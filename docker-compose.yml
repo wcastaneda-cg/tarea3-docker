@@ -1,0 +1,83 @@
+name: lightning-regtest
+
+services:
+  bitcoin:
+    build:
+      context: .
+      args:
+        BITCOIN_VERSION: ${BITCOIN_VERSION:-31.1}
+    image: ${BITCOIN_IMAGE:-bitcoin-core:latest}
+    container_name: bitcoin-regtest
+    command:
+      - "-regtest=1"
+      - "-server=1"
+      - "-daemon=0"
+      - "-printtoconsole=1"
+      - "-rpcbind=0.0.0.0"
+      - "-rpcallowip=0.0.0.0/0"
+      - "-rpcuser=${BITCOIN_RPC_USER:-bitcoin}"
+      - "-rpcpassword=${BITCOIN_RPC_PASSWORD:-bitcoin-regtest-password}"
+      - "-zmqpubrawblock=tcp://0.0.0.0:28332"
+      - "-zmqpubrawtx=tcp://0.0.0.0:28333"
+    volumes: [bitcoin-data:/home/bitcoin/.bitcoin]
+    ports:
+      - "${BITCOIN_P2P_PORT:-18444}:18444"
+      - "${BITCOIN_RPC_PORT:-18443}:18443"
+    healthcheck:
+      test: ["CMD-SHELL", "bitcoin-cli -regtest -rpcuser=$${BITCOIN_RPC_USER:-bitcoin} -rpcpassword=$${BITCOIN_RPC_PASSWORD:-bitcoin-regtest-password} getblockchaininfo"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  lnd:
+    image: lightninglabs/lnd:v0.19.3-beta
+    container_name: lnd-regtest
+    depends_on:
+      bitcoin: {condition: service_healthy}
+    command:
+      - lnd
+      - --bitcoin.active
+      - --bitcoin.regtest
+      - --bitcoin.node=bitcoind
+      - "--bitcoind.rpchost=bitcoin:18443"
+      - "--bitcoind.rpcuser=${BITCOIN_RPC_USER:-bitcoin}"
+      - "--bitcoind.rpcpass=${BITCOIN_RPC_PASSWORD:-bitcoin-regtest-password}"
+      - "--bitcoind.zmqpubrawblock=tcp://bitcoin:28332"
+      - "--bitcoind.zmqpubrawtx=tcp://bitcoin:28333"
+      - --rpclisten=0.0.0.0:10009
+      - --restlisten=0.0.0.0:8080
+      - --listen=0.0.0.0:9735
+      - --tlsextradomain=lnd
+      - --noseedbackup
+    volumes: [lnd-data:/root/.lnd]
+    ports:
+      - "${LND_P2P_PORT:-9735}:9735"
+      - "${LND_RPC_PORT:-10009}:10009"
+      - "${LND_REST_PORT:-8080}:8080"
+
+  mostro:
+    image: mostrop2p/mostro:latest
+    container_name: mostro-regtest
+    depends_on:
+      lnd: {condition: service_started}
+    volumes:
+      - ./mostro/settings.toml:/config/settings.toml:ro
+      - mostro-data:/config/data
+      - lnd-data:/lnd:ro
+
+  rtl:
+    image: shahanafarooqui/rtl:v0.15.8
+    container_name: rtl
+    depends_on:
+      lnd: {condition: service_started}
+    ports: ["${RTL_PORT:-3000}:3000"]
+    volumes:
+      - ./rtl/RTL-Config.json:/RTL/RTL-Config.json:ro
+      - lnd-data:/data/lnd:ro
+      - rtl-data:/data/rtl
+
+volumes:
+  bitcoin-data:
+  lnd-data:
+  mostro-data:
+  rtl-data:
